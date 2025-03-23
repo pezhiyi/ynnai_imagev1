@@ -3,16 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3005",
+    "dev": "next dev -p 3005 -H 0.0.0.0",
     "build": "next build",
-    "start": "next start -p 3005",
+    "start": "next start -p 3008 -H 0.0.0.0",
+    "clean": "rm -rf .next && rm -rf node_modules/.cache",
     "lint": "next lint"
   },
   "dependencies": {
     "@baiducloud/sdk": "^1.0.2",
     "axios": "^1.8.4",
+    "browser-image-compression": "^2.0.2",
     "canvas": "^3.1.0",
     "file-saver": "^2.0.5",
+    "jspdf": "^3.0.1",
+    "jspdf-fonts": "^0.0.2",
     "jszip": "^3.10.1",
     "next": "^14.0.0",
     "react": "^18.2.0",
