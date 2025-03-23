@@ -9,6 +9,7 @@ import Gallery from './components/ImageLibrary/Gallery';
 import Header from './components/Header';
 import { addToLibrary } from './utils/libraryStorage';
 import ShipmentList from './components/ShipmentManagement/ShipmentList';
+import imageCompression from 'browser-image-compression';
 
 export default function Home() {
   const [uploadedImage, setUploadedImage] = useState(null);
@@ -119,59 +120,35 @@ export default function Home() {
     }
   };
 
-  // 图片压缩函数
-  const compressImage = (file, maxSizeMB) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      
-      reader.onload = (event) => {
-        // 使用全局 window.Image 而不是导入的 Next.js Image 组件
-        const img = new window.Image();
-        img.src = event.target.result;
-        
-        img.onload = () => {
-          let quality = 0.7; // 初始压缩质量
-          let canvas = document.createElement('canvas');
-          let ctx = canvas.getContext('2d');
-          
-          // 保持宽高比例
-          let width = img.width;
-          let height = img.height;
-          
-          // 设置画布尺寸
-          canvas.width = width;
-          canvas.height = height;
-          
-          // 绘制图片
-          ctx.drawImage(img, 0, 0, width, height);
-          
-          // 使用递归压缩直到小于maxSizeMB
-          const compressLoop = (q) => {
-            canvas.toBlob((blob) => {
-              // 检查大小
-              if (blob.size / (1024 * 1024) <= maxSizeMB || q <= 0.1) {
-                resolve(blob);
-              } else {
-                // 继续压缩
-                q -= 0.1;
-                compressLoop(q);
-              }
-            }, file.type, q);
-          };
-          
-          compressLoop(quality);
-        };
-        
-        img.onerror = () => {
-          reject(new Error('图片加载失败'));
-        };
+  // 替换原有的压缩函数
+  const compressImage = async (file, maxSizeMB) => {
+    try {
+      console.log('【前端】开始压缩图片:', {
+        原始大小: `${(file.size / 1024 / 1024).toFixed(2)}MB`,
+        目标大小: `${maxSizeMB}MB`,
+        文件类型: file.type
+      });
+
+      const options = {
+        maxSizeMB: maxSizeMB,
+        maxWidthOrHeight: 1024,
+        useWebWorker: true,
+        fileType: file.type
       };
-      
-      reader.onerror = () => {
-        reject(new Error('文件读取失败'));
-      };
-    });
+
+      const compressedFile = await imageCompression(file, options);
+
+      console.log('【前端】压缩完成:', {
+        压缩前: `${(file.size / 1024 / 1024).toFixed(2)}MB`,
+        压缩后: `${(compressedFile.size / 1024 / 1024).toFixed(2)}MB`,
+        压缩率: `${((1 - compressedFile.size / file.size) * 100).toFixed(1)}%`
+      });
+
+      return compressedFile;
+    } catch (error) {
+      console.error('【前端】图片压缩失败:', error);
+      throw new Error('图片压缩失败');
+    }
   };
 
   const handleSearch = async (file) => {
