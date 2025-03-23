@@ -44,9 +44,18 @@ export default function Home() {
     }
 
     try {
+      // 如果已有图片，先清除
+      if (uploadedImage) {
+        console.log('【前端】替换已上传的图片:', {
+          原图片: uploadedImage.name,
+          新图片: file.name
+        });
+      }
+      
       // 设置上传的图片
       setUploadedImage(file);
       setError('');
+      setSearchResults([]); // 清除之前的搜索结果
 
       // 如果是自动搜索（粘贴），直接搜索
       if (autoSearch) {
@@ -86,6 +95,7 @@ export default function Home() {
       });
 
       const data = await response.json();
+      
       console.log('【前端】收到服务器响应:', {
         状态码: response.status,
         成功: data.success,
@@ -93,7 +103,7 @@ export default function Home() {
         图片签名: data.cont_sign,
         存储URL: data.bosUrl
       });
-      
+
       if (!response.ok) {
         throw new Error(data.error || '添加失败');
       }
@@ -103,10 +113,48 @@ export default function Home() {
         是否压缩: data.isCompressed,
         文件名: data.filename,
         文件大小: `${(data.filesize / 1024 / 1024).toFixed(2)}MB`,
-        存储位置: data.bosKey
+        存储位置: data.bosKey,
+        图库ID: data.cont_sign.replace(',', '_')
       });
 
-      alert('图片已成功添加到图库！');
+      // 使用新的图库API保存图片数据到服务器
+      if (data.success) {
+        const galleryItem = {
+          id: data.cont_sign.replace(',', '_'),
+          bosUrl: data.bosUrl,
+          imageUrl: data.imageUrl,
+          thumbnailUrl: data.imageUrl, 
+          filename: data.filename,
+          filesize: data.filesize,
+          dateAdded: new Date().toISOString(),
+          cont_sign: data.cont_sign,
+          bosKey: data.bosKey,
+          imageType: uploadedImage.type
+        };
+        
+        try {
+          // 保存到服务器端图库
+          await fetch('/api/gallery', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(galleryItem)
+          });
+          
+          // 通知Gallery组件刷新
+          window.dispatchEvent(new CustomEvent('refresh_gallery'));
+        } catch (galleryError) {
+          console.error('保存到图库失败:', galleryError);
+        }
+      }
+
+      setSuccessMessage('图片已成功添加到图库！');
+      
+      // 3秒后自动清除成功消息
+      setTimeout(() => {
+        setSuccessMessage('');
+      }, 3000);
       
     } catch (error) {
       console.error('【前端】添加失败:', {
@@ -114,7 +162,7 @@ export default function Home() {
         错误信息: error.message,
         堆栈: error.stack
       });
-      alert(error.message || '添加到图库失败，请重试');
+      setError(error.message || '添加到图库失败，请重试');
     } finally {
       setIsLoading(false);
     }
@@ -252,12 +300,6 @@ export default function Home() {
                     {error}
                   </div>
                 )}
-                
-                {successMessage && (
-                  <div className="mt-2 p-2 bg-green-50 text-green-600 text-sm rounded-md">
-                    {successMessage}
-                  </div>
-                )}
               </div>
             </div>
             
@@ -270,6 +312,18 @@ export default function Home() {
                 搜索结果
               </h2>
               <div className="flex-grow overflow-auto pr-1">
+                {!isLoading && !searchResults && (
+                  <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+                    <div className="bg-gray-50 rounded-full p-6 mb-4">
+                      <svg className="w-12 h-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" 
+                          d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-lg font-medium text-gray-600 mb-2">尚未找到相似结果</h3>
+                    <p className="text-sm text-gray-500">上传图片并点击"以图搜图"按钮</p>
+                  </div>
+                )}
                 <ResultGrid results={searchResults} isLoading={isLoading} isMobile={isMobile} />
               </div>
             </div>
@@ -284,6 +338,18 @@ export default function Home() {
           </div>
         )}
       </div>
+      
+      {/* 添加成功消息提示 */}
+      {successMessage && (
+        <div className="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg animate-fade-in-out">
+          <div className="flex items-center">
+            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+            </svg>
+            {successMessage}
+          </div>
+        </div>
+      )}
       
       <footer className="py-2 text-center text-gray-500 text-xs border-t border-gray-200">
         <p>YnnAI独立开发 © {new Date().getFullYear()}</p>
