@@ -169,7 +169,11 @@ export async function POST(request) {
       isExisting: searchLibraryResult.isExisting,
       isCompressed,
       briefUpdateSuccess: briefUpdateResult.success,
-      src: standardImageUrl
+      src: standardImageUrl,
+      dateAdded: new Date().toISOString(),
+      id: contSign.replace(',', '_'),
+      thumbnailUrl: standardImageUrl,
+      imageType: originalImageFile.type
     });
     
   } catch (error) {

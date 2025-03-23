@@ -8,7 +8,7 @@ export async function GET(request) {
     // 获取查询参数
     const { searchParams } = new URL(request.url);
     const start = parseInt(searchParams.get('start') || '0');
-    const count = parseInt(searchParams.get('count') || '20');
+    const count = parseInt(searchParams.get('count') || '100');
     
     // 获取访问令牌
     const accessToken = await getAccessToken();
@@ -18,12 +18,14 @@ export async function GET(request) {
       method: 'GET',
       url: `https://aip.baidubce.com/rest/2.0/image-classify/v1/realtime_search/similar/list?access_token=${accessToken}&start=${start}&num=${count}`,
       headers: {
+        'Content-Type': 'application/json',
         'Accept': 'application/json'
       }
     });
     
     // 处理响应
     if (response.data.error_code) {
+      console.error('获取图库列表失败:', response.data.error_msg);
       return NextResponse.json({
         success: false,
         message: `查询图库失败: ${response.data.error_msg}`,
@@ -31,18 +33,34 @@ export async function GET(request) {
       });
     }
     
-    // 处理返回的图片数据
+    // 提取并增强图片数据
     const images = response.data.result || [];
     
-    // 增强图片数据，添加完整URL
-    const enhancedImages = images.map(img => ({
-      ...img,
-      imageUrl: img.brief ? extractImageUrlFromBrief(img.brief) : null
-    }));
+    // 增强图片数据，从brief中提取URL等信息
+    const enhancedImages = images.map(img => {
+      let briefData = {};
+      try {
+        if (img.brief) {
+          briefData = JSON.parse(img.brief);
+        }
+      } catch (e) {
+        console.error('解析brief失败:', e);
+      }
+      
+      return {
+        ...img,
+        imageUrl: briefData.imageUrl || null,
+        bosUrl: briefData.bosUrl || null,
+        filename: briefData.filename || null,
+        filesize: briefData.filesize || null,
+        dateAdded: briefData.dateAdded || null,
+        additionalInfo: briefData
+      };
+    });
     
     return NextResponse.json({
       success: true,
-      total: response.data.total_num || 0,
+      total: response.data.result_num || 0,
       start,
       count,
       images: enhancedImages
@@ -54,17 +72,5 @@ export async function GET(request) {
       { success: false, message: `获取图库列表失败: ${error.message}` },
       { status: 500 }
     );
-  }
-}
-
-// 从brief JSON字符串中提取imageUrl
-function extractImageUrlFromBrief(briefStr) {
-  try {
-    if (!briefStr) return null;
-    const brief = JSON.parse(briefStr);
-    return brief.imageUrl || null;
-  } catch (e) {
-    console.error('解析brief失败:', e);
-    return null;
   }
 } 
