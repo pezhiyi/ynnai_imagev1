@@ -8,6 +8,12 @@ export async function POST(request) {
   try {
     console.log('【图片搜索】开始处理搜索请求');
     
+    // 添加新的日志...
+    console.log('【图片搜索】初始化:', {
+      时间: new Date().toISOString(),
+      环境: process.env.NODE_ENV
+    });
+    
     // 获取表单数据
     const formData = await request.formData();
     const imageFile = formData.get('image');

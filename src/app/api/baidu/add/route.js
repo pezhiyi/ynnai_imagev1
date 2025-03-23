@@ -147,6 +147,12 @@ export async function POST(request) {
       存储URL: standardImageUrl
     });
 
+    // 添加新的日志...
+    console.log('【图库添加】处理开始:', {
+      时间: new Date().toISOString(),
+      环境: process.env.NODE_ENV
+    });
+
     // 全部成功，返回结果
     return NextResponse.json({
       success: true,
