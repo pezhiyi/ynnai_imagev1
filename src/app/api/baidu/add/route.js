@@ -14,8 +14,18 @@ if (!process.env.BAIDU_BOS_DOMAIN) {
 
 export async function POST(request) {
   try {
+    console.log('【图库添加】开始处理添加请求');
+    
+    // 检查环境变量
+    console.log('【图库添加】检查环境配置:', {
+      BOS_DOMAIN: process.env.BAIDU_BOS_DOMAIN ? '已配置' : '未配置',
+      BOS_ENDPOINT: process.env.BAIDU_BOS_ENDPOINT ? '已配置' : '未配置',
+      BOS_BUCKET: process.env.BAIDU_BOS_BUCKET ? '已配置' : '未配置',
+      API_KEY: process.env.BAIDU_API_KEY ? '已配置' : '未配置'
+    });
+
     if (!process.env.BAIDU_BOS_DOMAIN) {
-      console.error('未配置BOS域名');
+      console.error('【图库添加】错误: 未配置BOS域名');
       return NextResponse.json(
         { success: false, message: '服务器配置错误：未设置存储域名' },
         { status: 500 }
@@ -23,34 +33,26 @@ export async function POST(request) {
     }
 
     const formData = await request.formData();
-    
-    // 处理图片上传
     const originalImageFile = formData.get('image');
     const filename = formData.get('filename') || originalImageFile.name || 'upload.jpg';
     const filesize = originalImageFile.size;
     
-    if (!originalImageFile) {
-      return NextResponse.json(
-        { success: false, message: '请提供图片' },
-        { status: 400 }
-      );
-    }
-    
-    console.log('接收到上传请求:', {
-      filename,
-      filesize,
-      type: originalImageFile.type
+    console.log('【图库添加】接收到文件:', {
+      文件名: filename,
+      大小: `${(filesize / 1024 / 1024).toFixed(2)}MB`,
+      类型: originalImageFile.type
     });
     
-    // 1. 准备两个版本的图片 - 原始版和用于搜索的压缩版
+    // 1. 准备图片数据
+    console.log('【图库添加】开始处理图片数据');
     const originalBuffer = await originalImageFile.arrayBuffer();
     
-    // 检查图片大小，如果超过3MB，则压缩用于搜索库
+    // 检查图片大小
     let searchImageBuffer;
     let isCompressed = false;
     
     if (filesize > 3 * 1024 * 1024) {
-      // 压缩图片用于搜索图库
+      console.log('【图库添加】图片超过3MB，开始压缩');
       searchImageBuffer = await compressImage(originalBuffer, {
         maxSize: 3 * 1024 * 1024,
         minWidth: 50,
@@ -59,11 +61,14 @@ export async function POST(request) {
         preserveFormat: true
       });
       isCompressed = true;
-      console.log(`图片已压缩: ${filesize} → ${searchImageBuffer.length} 字节`);
+      console.log('【图库添加】压缩完成:', {
+        原始大小: `${(filesize / 1024 / 1024).toFixed(2)}MB`,
+        压缩后: `${(searchImageBuffer.length / 1024 / 1024).toFixed(2)}MB`,
+        压缩率: `${((1 - searchImageBuffer.length / filesize) * 100).toFixed(1)}%`
+      });
     } else {
-      // 图片已经小于3MB，直接使用
+      console.log('【图库添加】图片小于3MB，无需压缩');
       searchImageBuffer = Buffer.from(originalBuffer);
-      isCompressed = false;
     }
     
     // 创建File对象用于搜索图库上传
@@ -73,10 +78,18 @@ export async function POST(request) {
       { type: originalImageFile.type || 'image/png' }
     );
     
-    // 2. 先添加到图像搜索库 (压缩版本)
+    // 2. 添加到搜索库
+    console.log('【图库添加】开始添加到搜索库');
     const searchLibraryResult = await addToImageSearchLibrary(searchImageFile);
     
+    console.log('【图库添加】搜索库添加结果:', {
+      成功: searchLibraryResult.success,
+      是否已存在: searchLibraryResult.isExisting,
+      图片签名: searchLibraryResult.cont_sign
+    });
+    
     if (!searchLibraryResult.success) {
+      console.error('【图库添加】添加到搜索库失败:', searchLibraryResult);
       return NextResponse.json(
         { 
           success: false, 
@@ -87,32 +100,28 @@ export async function POST(request) {
       );
     }
     
-    // 获取cont_sign，这是百度为图片分配的唯一标识
+    // 3. 上传到BOS
+    console.log('【图库添加】开始上传到BOS存储');
     const contSign = searchLibraryResult.cont_sign;
+    const bosKey = generateBosKey(null, contSign);
     
-    // 使用统一的生成函数生成BOS Key
-    const bosKey = generateBosKey(null, contSign); // 总是基于cont_sign
+    console.log('【图库添加】BOS上传信息:', {
+      文件名: filename,
+      BOS密钥: bosKey,
+      存储桶: process.env.BAIDU_BOS_BUCKET
+    });
     
-    // 上传到BOS - 原始版本保持高质量
     const bosUploadResult = await uploadToBos(originalImageFile, bosKey);
     
-    if (!bosUploadResult.success) {
-      return NextResponse.json({
-        success: true, // 整体仍视为成功
-        message: searchLibraryResult.isExisting 
-          ? '图片已存在于图库中，但未能上传到BOS' 
-          : '图片已添加到图库，但未能上传到BOS',
-        cont_sign: contSign,
-        bosError: bosUploadResult.message,
-        isExisting: searchLibraryResult.isExisting,
-        isCompressed
-      });
-    }
+    console.log('【图库添加】BOS上传结果:', {
+      成功: bosUploadResult.success,
+      URL: bosUploadResult.success ? bosUploadResult.bosUrl : '上传失败'
+    });
     
-    // 构建标准化的URL
+    // 4. 更新brief
+    console.log('【图库添加】开始更新图片元数据');
     const standardImageUrl = `https://${process.env.BAIDU_BOS_DOMAIN}/${bosKey}`;
     
-    // 更新brief - 使用标准化的URL
     const briefUpdateResult = await updateImageBrief(contSign, standardImageUrl, {
       filename,
       filesize: originalImageFile.size,
@@ -123,6 +132,21 @@ export async function POST(request) {
       updateTime: new Date().toISOString()
     });
     
+    console.log('【图库添加】元数据更新结果:', {
+      成功: briefUpdateResult.success,
+      图片签名: contSign,
+      标准URL: standardImageUrl
+    });
+    
+    // 5. 完成处理
+    console.log('【图库添加】处理完成:', {
+      总体结果: 'success',
+      图片签名: contSign,
+      是否压缩: isCompressed,
+      是否已存在: searchLibraryResult.isExisting,
+      存储URL: standardImageUrl
+    });
+
     // 全部成功，返回结果
     return NextResponse.json({
       success: true,
@@ -143,7 +167,11 @@ export async function POST(request) {
     });
     
   } catch (error) {
-    console.error('添加图片失败:', error);
+    console.error('【图库添加】处理失败:', {
+      错误类型: error.name,
+      错误信息: error.message,
+      堆栈: error.stack
+    });
     return NextResponse.json(
       { success: false, message: `添加图片失败: ${error.message}` },
       { status: 500 }
