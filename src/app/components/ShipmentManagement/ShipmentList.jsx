@@ -43,6 +43,9 @@ export default function ShipmentList() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
   
+  // 添加一个新的状态来跟踪PDF导出的加载状态
+  const [pdfExportLoading, setPdfExportLoading] = useState(false);
+  
   // 加载发货数据
   useEffect(() => {
     const loadShipments = () => {
@@ -683,6 +686,380 @@ export default function ShipmentList() {
     }
   };
   
+  const handleExportToPDF = async () => {
+    // 根据选中状态决定导出哪些商品
+    let itemsToExport = [];
+    let exportTitle = '';
+    
+    if (selectedIds.length > 0) {
+      // 导出选中的商品
+      itemsToExport = shipments.filter(item => selectedIds.includes(item.id));
+      exportTitle = `选中商品(${selectedIds.length}个)`;
+    } else {
+      // 没有选中项时，导出待发货状态的商品
+      itemsToExport = shipments.filter(item => item.status === '待发货');
+      exportTitle = '待发货商品';
+      
+      if (itemsToExport.length === 0) {
+        alert('没有待发货的商品');
+        return;
+      }
+    }
+    
+    if (itemsToExport.length === 0) {
+      alert('没有选中任何商品');
+      return;
+    }
+
+    setPdfExportLoading(true);
+    
+    try {
+      // 动态加载jsPDF和html2canvas库
+      const loadJsPDF = () => {
+        return new Promise((resolve, reject) => {
+          if (window.jspdf && window.jspdf.jsPDF) {
+            resolve(window.jspdf.jsPDF);
+            return;
+          }
+          
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+          script.integrity = 'sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNTlrdUmTzrDgektczlKNRRhy5X5AAOnx5S09ydFYWWNSfcEqDTTHgtNA==';
+          script.crossOrigin = 'anonymous';
+          
+          script.onload = () => resolve(window.jspdf.jsPDF);
+          script.onerror = () => reject(new Error('Failed to load jsPDF'));
+          
+          document.head.appendChild(script);
+        });
+      };
+      
+      const loadHtml2Canvas = () => {
+        return new Promise((resolve, reject) => {
+          if (window.html2canvas) {
+            resolve(window.html2canvas);
+            return;
+          }
+          
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+          script.integrity = 'sha512-BNaRQnYJYiPSqHHDb58B0yaPfCu+Wgds8Gp/gU33kqBtgNS4tSPHuGibyoeqMV/TJlSKda6FXzoEyYGjTe+vXA==';
+          script.crossOrigin = 'anonymous';
+          
+          script.onload = () => resolve(window.html2canvas);
+          script.onerror = () => reject(new Error('Failed to load html2canvas'));
+          
+          document.head.appendChild(script);
+        });
+      };
+
+      // 加载所需的库
+      const jsPDF = await loadJsPDF();
+      const html2canvas = await loadHtml2Canvas();
+      
+      // 创建新的PDF文档，使用A4大小，纵向
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+      
+      // 辅助函数 - 使用Canvas渲染文本为图片，解决中文显示问题
+      const renderTextAsImage = async (text, fontSize = 10, color = '#000000') => {
+        // 创建临时canvas
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // 使用常见的中文字体
+        ctx.font = `${fontSize}px "Microsoft YaHei", "SimHei", Arial, sans-serif`;
+        
+        // 测量文本宽度
+        const textMetrics = ctx.measureText(text);
+        const textWidth = textMetrics.width + 10; // 添加一些边距
+        
+        // 设置canvas大小
+        canvas.width = textWidth;
+        canvas.height = fontSize * 1.5;
+        
+        // 清除画布并重新设置字体(canvas尺寸改变后需要重设)
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.font = `${fontSize}px "Microsoft YaHei", "SimHei", Arial, sans-serif`;
+        ctx.fillStyle = color;
+        ctx.textBaseline = 'top';
+        
+        // 绘制文本
+        ctx.fillText(text, 5, 5);
+        
+        return {
+          dataUrl: canvas.toDataURL('image/png'),
+          width: textWidth / 3.78, // 粗略转换为mm
+          height: (fontSize * 1.5) / 3.78 // 粗略转换为mm
+        };
+      };
+      
+      // 辅助函数 - 添加文本图像到PDF
+      const addTextImage = async (text, x, y, fontSize = 10, color = '#000000') => {
+        const { dataUrl, width, height } = await renderTextAsImage(text, fontSize, color);
+        doc.addImage(dataUrl, 'PNG', x, y, width, height);
+        return y + height + 1; // 返回下一行的y位置
+      };
+      
+      // 辅助函数 - 添加多行文本图像到PDF
+      const addMultilineTextImage = async (text, x, y, maxWidth, fontSize = 10, color = '#000000') => {
+        // 简单的文本分行算法
+        const words = text.split(' ');
+        const lines = [];
+        let currentLine = words[0];
+        
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.font = `${fontSize}px "Microsoft YaHei", "SimHei", Arial, sans-serif`;
+        
+        for (let i = 1; i < words.length; i++) {
+          const word = words[i];
+          const width = ctx.measureText(currentLine + ' ' + word).width;
+          if (width < maxWidth) {
+            currentLine += ' ' + word;
+          } else {
+            lines.push(currentLine);
+            currentLine = word;
+          }
+        }
+        lines.push(currentLine);
+        
+        let newY = y;
+        for (const line of lines) {
+          newY = await addTextImage(line, x, newY, fontSize, color);
+        }
+        
+        return newY;
+      };
+      
+      // 辅助函数 - 添加多行文本图像到PDF（改进版，适用于中文文本）
+      const addWrappedTextImage = async (text, x, y, maxWidth, fontSize = 10, color = '#000000') => {
+        if (!text) return y;
+        
+        // 创建临时canvas用于文本测量
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.font = `${fontSize}px "Microsoft YaHei", "SimHei", Arial, sans-serif`;
+        
+        // 中文文本分行策略：按字符拆分
+        const chars = text.split('');
+        let currentLine = '';
+        const lines = [];
+        
+        // 逐字符测量并添加到行
+        for (let i = 0; i < chars.length; i++) {
+          const testLine = currentLine + chars[i];
+          const metrics = ctx.measureText(testLine);
+          const testWidth = metrics.width;
+          
+          // 如果添加当前字符会超过最大宽度，则开始新行
+          // 将mm转换为像素大致乘以3.78
+          if (testWidth > maxWidth * 3.78 && currentLine.length > 0) {
+            lines.push(currentLine);
+            currentLine = chars[i];
+          } else {
+            currentLine = testLine;
+          }
+        }
+        
+        // 添加最后一行
+        if (currentLine.length > 0) {
+          lines.push(currentLine);
+        }
+        
+        // 渲染每一行
+        let newY = y;
+        for (const line of lines) {
+          const { dataUrl, width, height } = await renderTextAsImage(line, fontSize, color);
+          doc.addImage(dataUrl, 'PNG', x, newY, width, height);
+          newY += height + 1;
+        }
+        
+        return newY; // 返回最后一行之后的Y位置
+      };
+      
+      // 获取当前日期字符串
+      const today = new Date();
+      const dateStr = `${today.getFullYear()}${(today.getMonth()+1).toString().padStart(2, '0')}${today.getDate().toString().padStart(2, '0')}`;
+      
+      // 设置标题 - 使用Canvas渲染
+      let yPos = 15;
+      yPos = await addTextImage(`${exportTitle} - 发货单`, 15, yPos, 16, '#000000');
+      yPos = await addTextImage(`生成日期: ${today.toLocaleDateString('zh-CN')}`, 15, yPos + 2, 10, '#666666');
+      
+      // PDF内容配置
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 15; // 页面边距
+      yPos = 30; // 重置开始位置
+      
+      // 预加载分割线图片
+      const dividerImage = await new Promise((resolve, reject) => {
+        // 使用浏览器原生的Image构造函数，而不是Next.js的Image组件
+        const img = new window.Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.crossOrigin = "Anonymous";
+        img.src = "/1742747389040.png"; // 确保图片路径正确
+      });
+      
+      // 创建canvas并绘制图片以获取base64数据
+      const canvas = document.createElement('canvas');
+      // 将分割线宽度从60减小到40
+      const dividerWidth = 40; // 设置在PDF中的宽度(mm)，原来是60
+      const aspectRatio = dividerImage.height / dividerImage.width;
+      const dividerHeight = dividerWidth * aspectRatio;
+      
+      canvas.width = dividerImage.width;
+      canvas.height = dividerImage.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(dividerImage, 0, 0);
+      const dividerBase64 = canvas.toDataURL('image/png');
+      
+      // 为每个商品创建一个条目
+      for (let i = 0; i < itemsToExport.length; i++) {
+        const shipment = itemsToExport[i];
+        
+        // 检查是否需要新页
+        if (yPos > pageHeight - 60) {
+          doc.addPage();
+          yPos = 20;
+        }
+        
+        // 如果不是第一个项目，添加分割线图片
+        if (i > 0) {
+          // 计算居中位置
+          const dividerX = (pageWidth - dividerWidth) / 2;
+          
+          // 添加分割线图片
+          doc.addImage(dividerBase64, 'PNG', dividerX, yPos, dividerWidth, dividerHeight);
+          yPos += dividerHeight + 10; // 调整位置，留出间隙
+          
+          // 检查分割线后是否需要新页
+          if (yPos > pageHeight - 60) {
+            doc.addPage();
+            yPos = 20;
+          }
+        }
+        
+        // 添加标题和状态
+        yPos = await addTextImage(`商品 #${i+1}: ${shipment.material || '未指定材质'} ${shipment.size || '标准规格'}`, margin, yPos, 12, '#323232');
+        
+        // 状态标记 - 直接使用颜色背景块
+        const statusColors = {
+          '待发货': '#FFC107',
+          '已发货': '#2196F3',
+          '已完成': '#4CAF50',
+          '已取消': '#F44336'
+        };
+        
+        doc.setFillColor(statusColors[shipment.status] || '#757575');
+        doc.roundedRect(pageWidth - margin - 25, yPos - 7, 25, 6, 2, 2, 'F');
+        
+        // 状态文字 - 使用白色
+        await addTextImage(shipment.status, pageWidth - margin - 22, yPos - 6, 8, '#FFFFFF');
+        
+        yPos += 8;
+        
+        // 尝试加载商品图片
+        try {
+          // 使用临时<img>元素加载图片
+          const imgElement = new window.Image();
+          await new Promise((resolve, reject) => {
+            imgElement.onload = resolve;
+            imgElement.onerror = reject;
+            imgElement.crossOrigin = 'Anonymous';
+            imgElement.src = shipment.imageUrl;
+          });
+          
+          // 计算图片尺寸，保持比例 - 进一步增大图片尺寸
+          const imgWidth = 80; // 固定宽度(mm)，原来是65
+          const imgHeight = (imgElement.height / imgElement.width) * imgWidth;
+          
+          // 绘制图片
+          const imgCanvas = document.createElement('canvas');
+          imgCanvas.width = imgElement.width;
+          imgCanvas.height = imgElement.height;
+          const imgCtx = imgCanvas.getContext('2d');
+          imgCtx.drawImage(imgElement, 0, 0);
+          
+          const imgData = imgCanvas.toDataURL('image/jpeg', 0.95);
+          doc.addImage(imgData, 'JPEG', margin, yPos, imgWidth, imgHeight);
+          
+          // 信息部分在图片右侧
+          let infoYPos = yPos + 5;
+          
+          // 收货地址 - 使用自动换行函数处理
+          infoYPos = await addWrappedTextImage(`收货地址: ${shipment.address || '未填写'}`, 
+            margin + imgWidth + 5, infoYPos, 
+            pageWidth - margin - margin - imgWidth - 10, // 可用最大宽度
+            14, '#505050');
+          
+          // 商品信息 - 增大其他文字
+          infoYPos = await addTextImage(`材质: ${shipment.material || '未指定'}`, 
+            margin + imgWidth + 5, infoYPos + 2, 12, '#505050'); // 字体大小从10改为12
+          
+          infoYPos = await addTextImage(`规格: ${shipment.size || '标准'}`, 
+            margin + imgWidth + 5, infoYPos + 2, 12, '#505050'); // 字体大小从10改为12
+          
+          infoYPos = await addTextImage(`数量: ${shipment.quantity || 1}`, 
+            margin + imgWidth + 5, infoYPos + 2, 12, '#505050'); // 字体大小从10改为12
+          
+          // 备注 - 同样增大
+          if (shipment.notes) {
+            infoYPos = await addTextImage(`备注: ${shipment.notes}`, 
+              margin + imgWidth + 5, infoYPos + 2, 12, '#505050'); // 字体大小从10改为12
+          }
+          
+          // 更新Y位置到当前商品条目的底部
+          yPos = Math.max(yPos + imgHeight + 10, infoYPos + 10);
+          
+        } catch (error) {
+          console.error(`处理图片失败:`, error);
+          
+          // 如果图片加载失败，只显示文本信息
+          let textY = yPos;
+          
+          // 同样使用自动换行函数处理地址
+          textY = await addWrappedTextImage(`收货地址: ${shipment.address || '未填写'}`, 
+            margin, textY, pageWidth - margin - margin, 14, '#505050');
+          
+          textY = await addTextImage(`材质: ${shipment.material || '未指定'}`, 
+            margin, textY + 2, 12, '#505050'); // 字体大小从10改为12
+          
+          textY = await addTextImage(`规格: ${shipment.size || '标准'}`, 
+            margin, textY + 2, 12, '#505050'); // 字体大小从10改为12
+          
+          textY = await addTextImage(`数量: ${shipment.quantity || 1}`, 
+            margin, textY + 2, 12, '#505050'); // 字体大小从10改为12
+          
+          if (shipment.notes) {
+            textY = await addTextImage(`备注: ${shipment.notes}`, 
+              margin, textY + 2, 12, '#505050'); // 字体大小从10改为12
+          }
+          
+          yPos = textY + 10;
+        }
+      }
+      
+      // 保存PDF文件
+      doc.save(`${dateStr}_${exportTitle}_发货单.pdf`);
+      
+      // 显示成功提示
+      setExportSuccess(true);
+      setTimeout(() => setExportSuccess(false), 3000);
+      
+    } catch (error) {
+      console.error('导出PDF失败:', error);
+      alert('导出PDF失败，请重试: ' + error.message);
+    } finally {
+      setPdfExportLoading(false);
+    }
+  };
+  
   return (
     <div className="h-full flex flex-col">
       {/* 导出成功提示 */}
@@ -695,91 +1072,125 @@ export default function ShipmentList() {
         </div>
       )}
       
-      <div className="mb-4 flex justify-between items-center">
-        <h1 className="text-xl font-semibold text-gray-800">发货管理</h1>
-        
-        <div className="flex items-center space-x-3">
+      {/* 顶部控制栏 - 优化布局 */}
+      <div className="mb-6">
+        <div className="flex justify-between items-center mb-4">
+          <h1 className="text-xl font-semibold text-gray-800">发货管理</h1>
+          
           <button
             onClick={() => setShowAddForm(true)}
-            className="flex items-center px-3 py-1.5 bg-green-600 text-white rounded-md text-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-md text-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 shadow-sm transition-all duration-200"
           >
-            <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
             </svg>
             添加发货
           </button>
+        </div>
+        
+        {/* 过滤器和操作按钮区域 - 重新分组 */}
+        <div className="flex flex-wrap gap-4 items-center">
+          {/* 过滤器组 */}
+          <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-lg border border-gray-200">
+            <span className="text-sm text-gray-500">筛选:</span>
+            <select
+              value={filterStatus}
+              onChange={(e) => {
+                setFilterStatus(e.target.value);
+                setCurrentPage(1);
+                setSelectedIds([]);
+                setSelectAll(false);
+              }}
+              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="all">全部状态</option>
+              <option value="待发货">待发货</option>
+              <option value="已发货">已发货</option>
+              <option value="已完成">已完成</option>
+              <option value="已取消">已取消</option>
+            </select>
+            
+            <select
+              value={filterTag}
+              onChange={(e) => {
+                setFilterTag(e.target.value);
+                setCurrentPage(1);
+                setSelectedIds([]);
+                setSelectAll(false);
+              }}
+              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">全部标签</option>
+              {availableTags.map(tag => (
+                <option key={tag} value={tag}>{tag}</option>
+              ))}
+            </select>
+            
+            <button
+              onClick={() => setShowTagManager(true)}
+              className="flex items-center px-3 py-1.5 bg-white border border-gray-300 text-gray-700 rounded-md text-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+            >
+              <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+              </svg>
+              标签管理
+            </button>
+          </div>
           
-          <select
-            value={filterStatus}
-            onChange={(e) => {
-              setFilterStatus(e.target.value);
-              setCurrentPage(1);
-              setSelectedIds([]);
-              setSelectAll(false);
-            }}
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">全部状态</option>
-            <option value="待发货">待发货</option>
-            <option value="已发货">已发货</option>
-            <option value="已完成">已完成</option>
-            <option value="已取消">已取消</option>
-          </select>
-          
-          {/* 标签筛选下拉菜单 */}
-          <select
-            value={filterTag}
-            onChange={(e) => {
-              setFilterTag(e.target.value);
-              setCurrentPage(1);
-              setSelectedIds([]);
-              setSelectAll(false);
-            }}
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">全部标签</option>
-            {availableTags.map(tag => (
-              <option key={tag} value={tag}>{tag}</option>
-            ))}
-          </select>
-          
-          {/* 添加标签管理按钮 */}
-          <button
-            onClick={() => setShowTagManager(true)}
-            className="flex items-center px-3 py-1.5 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
-          >
-            <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-            </svg>
-            标签管理
-          </button>
-          
-          <button
-            onClick={handleExportShipments}
-            disabled={exportLoading}
-            className="flex items-center px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
-          >
-            {exportLoading ? (
-              <>
-                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                导出中...
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" 
-                    d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                {selectedIds.length > 0 ? `导出选中(${selectedIds.length})` : '导出待发货'}
-              </>
-            )}
-          </button>
+          {/* 导出按钮组 */}
+          <div className="flex items-center gap-3 ml-auto">
+            <button
+              onClick={handleExportToPDF}
+              disabled={pdfExportLoading}
+              className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-md text-sm hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:opacity-50 shadow-sm transition-all duration-200"
+            >
+              {pdfExportLoading ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  导出中...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" 
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  {selectedIds.length > 0 ? `导出PDF(${selectedIds.length})` : '导出PDF'}
+                </>
+              )}
+            </button>
+            
+            <button
+              onClick={handleExportShipments}
+              disabled={exportLoading}
+              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 shadow-sm transition-all duration-200"
+            >
+              {exportLoading ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  导出中...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" 
+                      d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  {selectedIds.length > 0 ? `导出ZIP(${selectedIds.length})` : '导出ZIP'}
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
       
+      {/* 数据表格区域 - 保持原有样式 */}
       <div className="bg-white rounded-lg shadow flex-1 flex flex-col">
         <div className="p-3 border-b">
           <div className="flex flex-wrap gap-2">
