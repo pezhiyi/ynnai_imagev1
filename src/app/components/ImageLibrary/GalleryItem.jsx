@@ -3,7 +3,7 @@ import Image from 'next/image';
 import { removeFromLibrary } from '../../utils/libraryStorage';
 import ImageDetails from './ImageDetails';
 
-export default function GalleryItem({ item, onSelect }) {
+export default function GalleryItem({ item, onSelect, onPreview, onShip }) {
   const [showDetails, setShowDetails] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -58,67 +58,74 @@ export default function GalleryItem({ item, onSelect }) {
   const imageUrl = getImageUrl(item);
   
   return (
-    <>
+    <div className="relative group">
       <div 
-        className="relative border rounded-md overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow"
-        onClick={() => setShowDetails(true)}
+        className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50 aspect-square relative cursor-pointer"
+        onClick={onPreview}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
-        <div className="relative pt-[100%] bg-gray-100">
-          {!imageError && imageUrl ? (
-            <Image
-              src={imageUrl || '/placeholder.png'}
-              alt={displayName}
-              fill
-              sizes="(max-width: 768px) 50vw, 33vw"
-              className="object-cover"
-              onError={() => setImageError(true)}
-              unoptimized={true}
-              loading="lazy"
-            />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <svg className="h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" 
-                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            </div>
-          )}
-          
-          {/* 悬停控制区 */}
-          {isHovered && (
-            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-              <div className="flex space-x-2">
-                <button 
-                  className="p-2 bg-white rounded-full text-blue-500 hover:text-blue-700"
-                  onClick={(e) => { e.stopPropagation(); onSelect && onSelect(); }}
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </button>
-                <button 
-                  className="p-2 bg-white rounded-full text-red-500 hover:text-red-700"
-                  onClick={handleDelete}
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        {item.thumbnailUrl || item.imageUrl || item.bosUrl ? (
+          <Image
+            src={item.thumbnailUrl || item.imageUrl || item.bosUrl}
+            alt={item.filename || 'Gallery image'}
+            fill
+            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
+            className="object-contain"
+            loading="lazy"
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full text-gray-400">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" 
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </div>
+        )}
         
-        <div className="p-2">
-          <div className="truncate text-sm font-medium text-gray-700" title={displayName}>
-            {displayName}
-          </div>
-          <div className="flex justify-between text-xs text-gray-500">
-            <span>{formatDate(item.dateAdded)}</span>
-            <span>{formatFileSize(item.filesize)}</span>
-          </div>
+        {/* 操作按钮容器 */}
+        <div className={`absolute bottom-0 right-0 p-1 flex space-x-1 bg-white bg-opacity-80 rounded-tl-md transition-all ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
+          {/* 现有的详情按钮 */}
+          <button
+            className="p-1 text-gray-600 hover:text-blue-600 bg-white rounded-full hover:bg-blue-50"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowDetails(true);
+            }}
+            title="详情"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </button>
+          
+          {/* 新增的发货按钮 */}
+          <button
+            className="p-1 text-gray-600 hover:text-indigo-600 bg-white rounded-full hover:bg-indigo-50"
+            onClick={(e) => {
+              e.stopPropagation();
+              onShip && onShip(item);
+            }}
+            title="发货"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8" />
+            </svg>
+          </button>
+          
+          {/* 现有的使用按钮 */}
+          <button
+            className="p-1 text-gray-600 hover:text-green-600 bg-white rounded-full hover:bg-green-50"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect && onSelect(item);
+            }}
+            title="使用此图片"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+            </svg>
+          </button>
         </div>
       </div>
       
@@ -129,6 +136,6 @@ export default function GalleryItem({ item, onSelect }) {
           onSelect={onSelect}
         />
       )}
-    </>
+    </div>
   );
 } 

@@ -1,3 +1,5 @@
+import React from 'react';
+
 export default function SearchControls({ onAddToLibrary, onSearch, isLoading }) {
   const handleSearchClick = async () => {
     try {
