@@ -59,61 +59,61 @@ export default function Home() {
   };
 
   const handleAddToLibrary = async () => {
-    if (!uploadedImage) {
-      setError('请先上传图片');
-      return;
-    }
-
-    setIsLoading(true);
-    setError('');
-
     try {
-      // 第一步：准备图片处理
-      const imageSize = uploadedImage.size / (1024 * 1024); // 转换为MB
-      let searchImageBlob = uploadedImage;
+      console.log('【前端】开始添加图片到图库');
       
-      // 如果图片大于3MB，为搜索图库压缩图片
-      if (imageSize > 3) {
-        searchImageBlob = await compressImage(uploadedImage, 3);
-        console.log('图片已压缩用于搜索图库，原始大小:', imageSize.toFixed(2), 'MB, 压缩后:', 
-          (searchImageBlob.size / (1024 * 1024)).toFixed(2), 'MB');
+      if (!uploadedImage) {
+        console.error('【前端】错误: 未选择图片');
+        alert('请先选择图片');
+        return;
       }
-      
-      // 第二步：准备表单数据
+
+      console.log('【前端】准备上传图片:', {
+        文件名: uploadedImage.name,
+        大小: `${(uploadedImage.size / 1024 / 1024).toFixed(2)}MB`,
+        类型: uploadedImage.type
+      });
+
+      setIsLoading(true);
       const formData = new FormData();
-      formData.append('image', searchImageBlob); // 可能是压缩后的或原始图片
-      formData.append('originalImage', uploadedImage); // 总是使用原始图片
-      formData.append('mode', 'add');
-      formData.append('filename', uploadedImage.name);
-      formData.append('filesize', uploadedImage.size);
-      
-      // 第三步：发送到统一的处理API
+      formData.append('image', uploadedImage);
+
+      console.log('【前端】发送添加请求');
       const response = await fetch('/api/baidu/add', {
         method: 'POST',
-        body: formData,
+        body: formData
+      });
+
+      const data = await response.json();
+      console.log('【前端】收到服务器响应:', {
+        状态码: response.status,
+        成功: data.success,
+        消息: data.message,
+        图片签名: data.cont_sign,
+        存储URL: data.bosUrl
       });
       
-      const data = await response.json();
-      
       if (!response.ok) {
-        throw new Error(data.message || '添加到图库失败');
+        throw new Error(data.error || '添加失败');
       }
-      
-      setSuccessMessage('图片已成功添加到搜索图库和商品图库');
-      setTimeout(() => setSuccessMessage(''), 3000);
-      
-      // 添加到本地图库
-      if (data.cont_sign) {
-        addToLibrary({
-          cont_sign: data.cont_sign,
-          bosUrl: data.imageUrl || data.bosUrl,
-          filesize: uploadedImage.size,
-          filename: uploadedImage.name,
-        });
-      }
+
+      console.log('【前端】图片添加成功:', {
+        是否已存在: data.isExisting,
+        是否压缩: data.isCompressed,
+        文件名: data.filename,
+        文件大小: `${(data.filesize / 1024 / 1024).toFixed(2)}MB`,
+        存储位置: data.bosKey
+      });
+
+      alert('图片已成功添加到图库！');
       
     } catch (error) {
-      setError(error.message);
+      console.error('【前端】添加失败:', {
+        错误类型: error.name,
+        错误信息: error.message,
+        堆栈: error.stack
+      });
+      alert(error.message || '添加到图库失败，请重试');
     } finally {
       setIsLoading(false);
     }

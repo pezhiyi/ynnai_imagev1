@@ -6,51 +6,45 @@ import { getImageUrlFromSearchItem } from '../../../utils/bosStorage';
 
 export async function POST(request) {
   try {
+    console.log('【图片搜索】开始处理搜索请求');
+    
     // 获取表单数据
     const formData = await request.formData();
     const imageFile = formData.get('image');
-    const mode = formData.get('mode') || 'search'; // 默认为搜索模式
+    const mode = formData.get('mode') || 'search';
+    
+    console.log('【图片搜索】请求信息:', {
+      模式: mode,
+      文件名: imageFile?.name,
+      文件大小: imageFile ? `${(imageFile.size / 1024 / 1024).toFixed(2)}MB` : '无文件',
+      文件类型: imageFile?.type
+    });
     
     if (!imageFile) {
+      console.error('【图片搜索】错误: 未提供图片');
       return NextResponse.json(
         { success: false, message: '未提供图片文件' },
         { status: 400 }
       );
     }
     
-    // 仅在添加模式下检查文件大小限制
-    if (mode === 'add') {
-      const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
-      if (imageFile.size > MAX_FILE_SIZE) {
-        return NextResponse.json({ 
-          message: '添加图库时，图片不能超过3MB' 
-        }, { status: 400 });
-      }
-    } else {
-      // 搜索模式下使用较大的限制
-      const MAX_SEARCH_FILE_SIZE = 100 * 1024 * 1024; // 100MB
-      if (imageFile.size > MAX_SEARCH_FILE_SIZE) {
-        return NextResponse.json({ 
-          message: '搜索图片不能超过100MB' 
-        }, { status: 400 });
-      }
+    // 检查文件大小限制
+    console.log('【图片搜索】检查文件大小限制');
+    if (mode === 'add' && imageFile.size > 3 * 1024 * 1024) {
+      console.error('【图片搜索】错误: 添加模式下文件过大');
+      return NextResponse.json({ 
+        message: '添加图库时，图片不能超过3MB' 
+      }, { status: 400 });
     }
     
-    // 记录原始图片信息
-    console.log('收到搜索请求:', {
-      filename: imageFile.name,
-      filesize: imageFile.size,
-      type: imageFile.type
-    });
-    
-    // 处理图片 - 准备用于搜索的版本
+    // 处理图片
+    console.log('【图片搜索】开始处理图片');
     const originalBuffer = await imageFile.arrayBuffer();
     let searchImageBuffer;
     let isCompressed = false;
     
-    // 检查图片大小，如果超过3MB，则压缩用于搜索
     if (imageFile.size > 3 * 1024 * 1024) {
-      // 压缩图片用于搜索
+      console.log('【图片搜索】图片需要压缩');
       searchImageBuffer = await compressImage(originalBuffer, {
         maxSize: 3 * 1024 * 1024,
         minWidth: 50,
@@ -58,9 +52,13 @@ export async function POST(request) {
         quality: 80
       });
       isCompressed = true;
-      console.log(`搜索图片已压缩: ${imageFile.size} → ${searchImageBuffer.length} 字节`);
+      console.log('【图片搜索】压缩完成:', {
+        原始大小: `${(imageFile.size / 1024 / 1024).toFixed(2)}MB`,
+        压缩后: `${(searchImageBuffer.length / 1024 / 1024).toFixed(2)}MB`,
+        压缩率: `${((1 - searchImageBuffer.length / imageFile.size) * 100).toFixed(1)}%`
+      });
     } else {
-      // 图片已经小于3MB，直接使用
+      console.log('【图片搜索】图片无需压缩');
       searchImageBuffer = Buffer.from(originalBuffer);
     }
     
@@ -72,72 +70,82 @@ export async function POST(request) {
     );
     
     // 获取访问令牌
+    console.log('【图片搜索】获取百度API访问令牌');
     const accessToken = await getAccessToken();
+    console.log('【图片搜索】成功获取访问令牌');
     
-    let responseData;
-    // 根据模式选择操作
-    if (mode === 'add') {
-      // 添加图片到库中
-      responseData = await addImageToLibrary(searchImageBuffer, accessToken);
-    } else {
-      // 搜索相似图片
-      const searchResults = await searchSimilarImages(searchImageFile);
-      
-      if (!searchResults.success) {
-        return NextResponse.json(
-          { 
-            success: false, 
-            message: `图片搜索失败: ${searchResults.message}`,
-            error: searchResults
-          },
-          { status: 500 }
-        );
-      }
-      
-      // 处理搜索结果，优化返回格式
-      const enhancedResults = searchResults.results.map(item => {
-        // 使用cont_sign生成标准URL
-        const bosKey = generateBosKey(null, item.cont_sign);
-        const standardImageUrl = getUrlFromBosKey(bosKey);
-        
-        // 尝试解析brief数据
-        let briefData = {};
-        try {
-          if (item.brief && typeof item.brief === 'string') {
-            briefData = JSON.parse(item.brief);
-          }
-        } catch (e) {
-          console.warn('解析brief数据失败:', e);
-        }
-        
-        // 构建增强的结果项 - 优先使用标准URL
-        return {
-          score: item.score,
-          cont_sign: item.cont_sign,
-          imageUrl: standardImageUrl,
-          bosUrl: standardImageUrl,
-          filename: briefData.filename || null,
-          filesize: briefData.filesize || null,
-          uploadTime: briefData.uploadTime || null,
-          bosKey: bosKey,
-          additionalInfo: briefData
-        };
-      });
-      
-      responseData = {
-        success: true,
-        message: `找到 ${enhancedResults.length} 个相似图片`,
-        isCompressed,
-        originalSize: imageFile.size,
-        searchSize: searchImageBuffer.length,
-        results: enhancedResults
-      };
+    // 执行搜索
+    console.log('【图片搜索】开始执行搜索');
+    const searchResults = await searchSimilarImages(searchImageFile);
+    
+    console.log('【图片搜索】搜索完成:', {
+      成功: searchResults.success,
+      结果数量: searchResults.results?.length || 0
+    });
+    
+    if (!searchResults.success) {
+      console.error('【图片搜索】搜索失败:', searchResults);
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: `图片搜索失败: ${searchResults.message}`,
+          error: searchResults
+        },
+        { status: 500 }
+      );
     }
     
-    // 返回处理结果
-    return NextResponse.json(responseData);
+    // 处理搜索结果
+    console.log('【图片搜索】开始处理搜索结果');
+    const enhancedResults = searchResults.results.map((item, index) => {
+      const bosKey = generateBosKey(null, item.cont_sign);
+      const standardImageUrl = getUrlFromBosKey(bosKey);
+      
+      let briefData = {};
+      try {
+        if (item.brief) {
+          briefData = JSON.parse(item.brief);
+          console.log(`【图片搜索】解析结果${index + 1}的brief数据成功`);
+        }
+      } catch (e) {
+        console.warn(`【图片搜索】解析结果${index + 1}的brief数据失败:`, e);
+      }
+      
+      return {
+        score: item.score,
+        cont_sign: item.cont_sign,
+        imageUrl: standardImageUrl,
+        bosUrl: standardImageUrl,
+        filename: briefData.filename || null,
+        filesize: briefData.filesize || null,
+        uploadTime: briefData.uploadTime || null,
+        bosKey: bosKey,
+        additionalInfo: briefData
+      };
+    });
+    
+    console.log('【图片搜索】结果处理完成:', {
+      总结果数: enhancedResults.length,
+      有效URL数: enhancedResults.filter(r => r.imageUrl).length,
+      平均相似度: (enhancedResults.reduce((sum, r) => sum + r.score, 0) / enhancedResults.length * 100).toFixed(1) + '%'
+    });
+    
+    // 返回结果
+    return NextResponse.json({
+      success: true,
+      message: `找到 ${enhancedResults.length} 个相似图片`,
+      isCompressed,
+      originalSize: imageFile.size,
+      searchSize: searchImageBuffer.length,
+      results: enhancedResults
+    });
+    
   } catch (error) {
-    console.error('搜索处理错误:', error);
+    console.error('【图片搜索】处理失败:', {
+      错误类型: error.name,
+      错误信息: error.message,
+      堆栈: error.stack
+    });
     return NextResponse.json(
       { success: false, message: `搜索失败: ${error.message}` },
       { status: 500 }
