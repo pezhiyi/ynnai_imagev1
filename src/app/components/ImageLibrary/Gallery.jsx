@@ -348,9 +348,9 @@ export default function Gallery({ onSelectImage }) {
       
       let currentPage = 1;
       
-      // 添加图片到PDF
-      for (let i = 0; i < selectedImages.length; i++) {
-        const image = selectedImages[i];
+      // 使用selectedItems而不是selectedImages
+      for (let i = 0; i < selectedItems.length; i++) {
+        const image = selectedItems[i];
         
         // 计算当前图片在页面上的位置
         const pageIndex = Math.floor(i / imagesPerPage);
@@ -367,9 +367,9 @@ export default function Gallery({ onSelectImage }) {
         const y = 40 + row * (imageHeight + 20);
         
         try {
-          // 使用图片URL而不是二进制数据
+          // 使用正确的URL属性
           doc.addImage(
-            image.url, 
+            image.bosUrl || image.imageUrl, 
             'JPEG', 
             x, 
             y, 
@@ -379,7 +379,7 @@ export default function Gallery({ onSelectImage }) {
           
           // 添加图片标题
           doc.setFontSize(10);
-          doc.text(image.name || `图片 ${i+1}`, x + imageWidth / 2, y + imageHeight + 10, { 
+          doc.text(image.filename || `图片 ${i+1}`, x + imageWidth / 2, y + imageHeight + 10, { 
             align: 'center',
             maxWidth: imageWidth
           });
