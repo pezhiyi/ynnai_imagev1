@@ -1,8 +1,8 @@
 import './globals.css'
 
 export const metadata = {
-  title: '图像搜索应用',
-  description: '基于百度AI的图像搜索应用',
+  title: 'YnnAI Product Library',
+  description: '基于百度AI的产品图片库',
   icons: {
     icon: '/favicon.ico',
   },
