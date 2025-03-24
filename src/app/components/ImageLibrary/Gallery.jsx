@@ -312,6 +312,99 @@ export default function Gallery({ onSelectImage }) {
     applyFiltersAndSort(library, filters, sortConfig);
   }, [searchTerm, selectedTags]);
   
+  // 修复PDF导出功能
+  const exportToPDF = async () => {
+    try {
+      setIsExporting(true);
+      console.log('开始导出PDF...');
+      
+      // 动态导入jsPDF库，解决SSR兼容性问题
+      const { jsPDF } = await import('jspdf');
+      
+      // 确保字体已加载
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+      
+      // 设置文档标题和创建时间
+      const title = '图像库导出';
+      const date = new Date().toLocaleDateString();
+      doc.setFontSize(18);
+      doc.text(title, 105, 15, { align: 'center' });
+      doc.setFontSize(12);
+      doc.text(`导出日期: ${date}`, 105, 25, { align: 'center' });
+      
+      // 计算每页可放几张图片
+      const pageWidth = 210;  // A4宽度(mm)
+      const pageHeight = 297; // A4高度(mm)
+      const margin = 20;
+      const imageWidth = 80;
+      const imageHeight = 80;
+      const imagesPerRow = Math.floor((pageWidth - 2 * margin) / imageWidth);
+      const rowsPerPage = Math.floor((pageHeight - 40 - margin) / (imageHeight + 20));
+      const imagesPerPage = imagesPerRow * rowsPerPage;
+      
+      let currentPage = 1;
+      
+      // 添加图片到PDF
+      for (let i = 0; i < selectedImages.length; i++) {
+        const image = selectedImages[i];
+        
+        // 计算当前图片在页面上的位置
+        const pageIndex = Math.floor(i / imagesPerPage);
+        if (pageIndex + 1 > currentPage) {
+          doc.addPage();
+          currentPage++;
+        }
+        
+        const indexOnPage = i % imagesPerPage;
+        const row = Math.floor(indexOnPage / imagesPerRow);
+        const col = indexOnPage % imagesPerRow;
+        
+        const x = margin + col * imageWidth;
+        const y = 40 + row * (imageHeight + 20);
+        
+        try {
+          // 使用图片URL而不是二进制数据
+          doc.addImage(
+            image.url, 
+            'JPEG', 
+            x, 
+            y, 
+            imageWidth, 
+            imageHeight
+          );
+          
+          // 添加图片标题
+          doc.setFontSize(10);
+          doc.text(image.name || `图片 ${i+1}`, x + imageWidth / 2, y + imageHeight + 10, { 
+            align: 'center',
+            maxWidth: imageWidth
+          });
+        } catch (imgError) {
+          console.error('添加图片到PDF时出错:', imgError);
+          // 添加错误提示替代图片
+          doc.setFillColor(240, 240, 240);
+          doc.rect(x, y, imageWidth, imageHeight, 'F');
+          doc.setFontSize(10);
+          doc.text('图片加载失败', x + imageWidth / 2, y + imageHeight / 2, { align: 'center' });
+        }
+      }
+      
+      // 保存PDF文件
+      doc.save('图像库导出.pdf');
+      console.log('PDF导出完成');
+      
+      setIsExporting(false);
+    } catch (error) {
+      console.error('导出PDF失败:', error);
+      alert('导出PDF失败，请重试: ' + (error.message || error));
+      setIsExporting(false);
+    }
+  };
+  
   return (
     <div className="w-full flex flex-col h-full">
       {/* 高级搜索和筛选工具栏 */}
